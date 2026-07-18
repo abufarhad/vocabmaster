@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VocabMaster — BCS, Bank, IBA &amp; Word Smart Vocabulary</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<p class="dedication">💐 Dedicated to my beloved wife — Anjuman</p>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">🗣️</span>
+    <div>
+      <h1>VocabMaster</h1>
+      <p class="tagline">BCS &middot; Bank &middot; IBA &middot; Word Smart vocabulary, made memorable</p>
+    </div>
+  </div>
+  <button id="themeToggle" class="icon-btn" title="Toggle light/dark">🌙</button>
+</header>
+
+<div class="toolbar">
+  <div class="search-wrap">
+    <span class="search-icon">🔎</span>
+    <input id="searchInput" type="text" placeholder="Search a word, meaning, or synonym..." autocomplete="off" />
+  </div>
+  <button id="dailyBtn" class="quiz-btn daily-btn">🎯 Daily Challenge</button>
+  <button id="quizBtn" class="quiz-btn">🎧 Listen &amp; Guess Quiz</button>
+  <button id="progressBtn" class="quiz-btn progress-btn">📊 My Progress</button>
+</div>
+
+<nav id="groupTabs" class="group-tabs"></nav>
+
+<div class="filter-row">
+  <button id="favToggle" class="filter-chip" data-active="false">🤍 Favorites</button>
+  <button id="impToggle" class="filter-chip" data-active="false">🔥 Most Important</button>
+  <button id="doneToggle" class="filter-chip" data-active="false">✅ Done</button>
+  <span class="imp-note" title="Not a verified exam-appearance count — a relative study-priority tier based on how often these words show up across common BCS/Bank/IBA prep material.">ⓘ what does &quot;Most Important&quot; mean?</span>
+</div>
+
+<div class="progress-row">
+  <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+  <span id="progressLabel" class="progress-label">0 / 0 learned</span>
+</div>
+
+<main id="cardGrid" class="card-grid"></main>
+
+<p id="emptyState" class="empty-state hidden">No words match your search. Try another term.</p>
+
+<!-- Quiz Modal -->
+<div id="quizModal" class="modal hidden">
+  <div class="modal-card">
+    <button id="quizClose" class="icon-btn modal-close">✕</button>
+    <h2>🎧 Listen &amp; Guess</h2>
+    <p class="quiz-sub">Tap play, listen carefully, then type the word you hear.</p>
+    <button id="quizPlay" class="quiz-play">🔊 Play word</button>
+    <input id="quizInput" type="text" placeholder="Type the word..." autocomplete="off" />
+    <button id="quizSubmit" class="quiz-submit">Check</button>
+    <p id="quizFeedback" class="quiz-feedback"></p>
+    <div class="quiz-footer">
+      <span id="quizScore">Score: 0 / 0</span>
+      <button id="quizNext" class="quiz-next">Next word ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pronunciation practice modal -->
+<div id="pronModal" class="modal hidden">
+  <div class="modal-card">
+    <button id="pronClose" class="icon-btn modal-close">✕</button>
+    <h2>🎤 Pronunciation Practice</h2>
+    <p class="quiz-sub">Target word:</p>
+    <p id="pronWord" class="pron-word"></p>
+    <p id="pronBn" class="pron-bn"></p>
+    <button id="pronListenModel" class="quiz-play">🔊 Hear correct pronunciation</button>
+    <button id="pronRecord" class="pron-record">🎙️ Tap and say the word</button>
+    <p id="pronHeard" class="pron-heard"></p>
+    <p id="pronResult" class="pron-result"></p>
+  </div>
+</div>
+
+<!-- Daily Challenge modal -->
+<div id="dailyModal" class="modal hidden">
+  <div class="modal-card daily-card">
+    <button id="dailyClose" class="icon-btn modal-close">✕</button>
+    <h2>🎯 Daily Challenge</h2>
+
+    <div id="dailySetup">
+      <p class="quiz-sub">How many new words do you want to learn each day?</p>
+      <input id="dailyTargetInput" type="number" min="1" max="30" value="5" />
+      <button id="dailyStartBtn" class="quiz-submit">Start my daily challenge</button>
+    </div>
+
+    <div id="dailyActive" class="hidden">
+      <div class="daily-stats">
+        <span id="streakBadge" class="streak-badge">🔥 0 day streak</span>
+        <span id="dailyProgressLabel" class="quiz-sub">0 / 0 practiced today</span>
+      </div>
+      <div id="dailyWordList" class="daily-word-list"></div>
+      <div class="daily-footer-row">
+        <button id="dailyChangeTarget" class="mini-btn">🔄 Reset today's challenge</button>
+        <button id="startExamBtn" class="quiz-submit">📝 Take Review Exam</button>
+      </div>
+      <p id="examHint" class="quiz-sub exam-hint"></p>
+    </div>
+  </div>
+</div>
+
+<!-- Review Exam modal -->
+<div id="examModal" class="modal hidden">
+  <div class="modal-card">
+    <button id="examClose" class="icon-btn modal-close">✕</button>
+    <h2>📝 Review Exam</h2>
+
+    <div id="examRunning">
+      <p id="examProgressLabel" class="quiz-sub">Question 1 / 10</p>
+      <p class="quiz-sub">What word means:</p>
+      <p id="examMeaning" class="pron-word" style="font-size:1.15rem;"></p>
+      <p id="examBn" class="pron-bn"></p>
+      <input id="examInput" type="text" placeholder="Type the word..." autocomplete="off" />
+      <button id="examSubmit" class="quiz-submit">Submit answer</button>
+      <p id="examFeedback" class="quiz-feedback"></p>
+    </div>
+
+    <div id="examResults" class="hidden">
+      <p class="pron-word" id="examScoreLine"></p>
+      <div id="examMissedList" class="daily-word-list"></div>
+      <button id="examCloseResults" class="quiz-submit">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- My Progress modal (global stats + Done Words section) -->
+<div id="progressModal" class="modal hidden">
+  <div class="modal-card progress-card">
+    <button id="progressClose" class="icon-btn modal-close">✕</button>
+    <h2>📊 My Progress</h2>
+
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <h3 class="done-heading">✅ Words You've Already Done</h3>
+    <p class="quiz-sub">Tap any word's picture to see it large. Tap ✕ to move it back to "not done yet".</p>
+    <input id="doneSearch" type="text" placeholder="Search your done words..." class="done-search" />
+    <div id="doneWordsList" class="done-word-grid"></div>
+    <p id="doneEmptyState" class="quiz-sub hidden">You haven't marked any words as done yet — tap the ☆ star on a card to add one here.</p>
+  </div>
+</div>
+
+<!-- Image lightbox -->
+<div id="imageLightbox" class="lightbox hidden">
+  <button id="lightboxClose" class="icon-btn lightbox-close">✕</button>
+  <div class="lightbox-content">
+    <img id="lightboxImg" src="" alt="" />
+    <p id="lightboxWord" class="lightbox-word"></p>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <p>120 curated words &middot; Tap a card to flip &middot; 🔊 hear it &middot; 🎤 practice your pronunciation</p>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
