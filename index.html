@@ -27,11 +27,15 @@
     <input id="searchInput" type="text" placeholder="Search a word, meaning, or synonym..." autocomplete="off" />
   </div>
   <button id="dailyBtn" class="quiz-btn daily-btn">🎯 Daily Challenge</button>
+  <button id="examsBtn" class="quiz-btn exams-btn">📝 Exams</button>
+  <button id="sprintBtn" class="quiz-btn sprint-btn">🚀 Priority Sprint</button>
   <button id="quizBtn" class="quiz-btn">🎧 Listen &amp; Guess Quiz</button>
   <button id="progressBtn" class="quiz-btn progress-btn">📊 My Progress</button>
 </div>
 
 <nav id="groupTabs" class="group-tabs"></nav>
+
+<nav id="alphaBar" class="alpha-bar"></nav>
 
 <div class="filter-row">
   <button id="favToggle" class="filter-chip" data-active="false">🤍 Favorites</button>
@@ -46,8 +50,73 @@
 </div>
 
 <main id="cardGrid" class="card-grid"></main>
+<div id="loadMoreSentinel" class="load-more-sentinel"></div>
 
 <p id="emptyState" class="empty-state hidden">No words match your search. Try another term.</p>
+
+<!-- Daily Learn page (full page, not a popup) -->
+<section id="dailyPage" class="full-page hidden">
+  <div class="full-page-header">
+    <button id="dailyPageBack" class="icon-btn" title="Back to words">←</button>
+    <h2>🎯 Daily Challenge</h2>
+  </div>
+
+  <div id="dailySetup" class="exam-panel">
+    <p class="quiz-sub">How many new words do you want to learn each day?</p>
+    <input id="dailyTargetInput" type="number" min="1" max="30" value="5" />
+    <button id="dailyStartBtn" class="quiz-submit">Start my daily challenge</button>
+  </div>
+
+  <div id="dailyActive" class="hidden">
+    <div class="daily-stats">
+      <span id="streakBadge" class="streak-badge">🔥 0 day streak</span>
+      <span id="dailyProgressLabel" class="quiz-sub">0 / 0 done today</span>
+    </div>
+    <div id="dailyWordGrid" class="card-grid"></div>
+    <div class="daily-footer-row">
+      <button id="dailyChangeTarget" class="mini-btn">🔄 Reset today's challenge</button>
+    </div>
+  </div>
+</section>
+
+<!-- Exams page (full page, not a popup) -->
+<section id="examPage" class="full-page hidden">
+  <div class="full-page-header">
+    <button id="examPageBack" class="icon-btn" title="Back to words">←</button>
+    <h2>📝 Exams</h2>
+  </div>
+
+  <div id="examChooser" class="exam-chooser">
+    <div class="exam-choice-card">
+      <h3>📅 Daily Exam</h3>
+      <p class="quiz-sub">Tests you on yesterday's Daily Challenge words.</p>
+      <p id="dailyExamHint" class="quiz-sub"></p>
+      <button id="startDailyExamBtn" class="quiz-submit">Take Daily Exam</button>
+    </div>
+    <div class="exam-choice-card">
+      <h3>🗓️ 3-Day Review Exam</h3>
+      <p class="quiz-sub">Tests you on every word you've completed in the last 3 days.</p>
+      <p id="threeDayExamHint" class="quiz-sub"></p>
+      <button id="start3DayExamBtn" class="quiz-submit">Take 3-Day Exam</button>
+    </div>
+  </div>
+
+  <div id="examRunning" class="exam-panel hidden">
+    <p id="examProgressLabel" class="quiz-sub">Question 1 / 10</p>
+    <p class="quiz-sub">What word means:</p>
+    <p id="examMeaning" class="pron-word" style="font-size:1.15rem;"></p>
+    <p id="examBn" class="pron-bn"></p>
+    <input id="examInput" type="text" placeholder="Type the word..." autocomplete="off" />
+    <button id="examSubmit" class="quiz-submit">Submit answer</button>
+    <p id="examFeedback" class="quiz-feedback"></p>
+  </div>
+
+  <div id="examResults" class="exam-panel hidden">
+    <p class="pron-word" id="examScoreLine"></p>
+    <div id="examMissedList" class="daily-word-list"></div>
+    <button id="examBackToChooser" class="quiz-submit">Back to exams</button>
+  </div>
+</section>
 
 <!-- Quiz Modal -->
 <div id="quizModal" class="modal hidden">
@@ -81,53 +150,61 @@
   </div>
 </div>
 
-<!-- Daily Challenge modal -->
-<div id="dailyModal" class="modal hidden">
+<!-- Priority Sprint modal -->
+<div id="sprintModal" class="modal hidden">
   <div class="modal-card daily-card">
-    <button id="dailyClose" class="icon-btn modal-close">✕</button>
-    <h2>🎯 Daily Challenge</h2>
+    <button id="sprintClose" class="icon-btn modal-close">✕</button>
+    <h2>🚀 Priority Sprint</h2>
 
-    <div id="dailySetup">
-      <p class="quiz-sub">How many new words do you want to learn each day?</p>
-      <input id="dailyTargetInput" type="number" min="1" max="30" value="5" />
-      <button id="dailyStartBtn" class="quiz-submit">Start my daily challenge</button>
+    <div id="sprintSetup">
+      <p class="quiz-sub">Study only 🔥 high-priority words in fixed batches. Review your batch for 3 days, then pass an exam to unlock the next one.</p>
+      <label class="quiz-sub" for="sprintSizeInput">Words per batch (15–20):</label>
+      <input id="sprintSizeInput" type="number" min="15" max="20" value="20" />
+      <button id="sprintStartBtn" class="quiz-submit">Start my sprint</button>
     </div>
 
-    <div id="dailyActive" class="hidden">
+    <div id="sprintActive" class="hidden">
       <div class="daily-stats">
-        <span id="streakBadge" class="streak-badge">🔥 0 day streak</span>
-        <span id="dailyProgressLabel" class="quiz-sub">0 / 0 practiced today</span>
+        <span id="sprintCycleBadge" class="sprint-badge">📦 Batch #1</span>
+        <span id="sprintDayLabel" class="quiz-sub">Day 1 of 3</span>
       </div>
-      <div id="dailyWordList" class="daily-word-list"></div>
+      <div id="sprintWordList" class="daily-word-list"></div>
       <div class="daily-footer-row">
-        <button id="dailyChangeTarget" class="mini-btn">🔄 Reset today's challenge</button>
-        <button id="startExamBtn" class="quiz-submit">📝 Take Review Exam</button>
+        <button id="sprintTakeExamBtn" class="quiz-submit">🔒 Exam locked</button>
       </div>
-      <p id="examHint" class="quiz-sub exam-hint"></p>
+      <p id="sprintExamHint" class="quiz-sub exam-hint"></p>
+    </div>
+
+    <div id="sprintDone" class="hidden">
+      <p class="pron-word">🎉 You've mastered all high-priority words!</p>
+      <p class="quiz-sub">There are no unfinished high-priority words left to build a new batch. Nicely done.</p>
     </div>
   </div>
 </div>
 
-<!-- Review Exam modal -->
-<div id="examModal" class="modal hidden">
+<!-- Priority Sprint exam modal -->
+<div id="sprintExamModal" class="modal hidden">
   <div class="modal-card">
-    <button id="examClose" class="icon-btn modal-close">✕</button>
-    <h2>📝 Review Exam</h2>
+    <button id="sprintExamClose" class="icon-btn modal-close">✕</button>
+    <h2>📝 Priority Sprint Exam</h2>
 
-    <div id="examRunning">
-      <p id="examProgressLabel" class="quiz-sub">Question 1 / 10</p>
+    <div id="sprintExamRunning">
+      <p id="sprintExamProgressLabel" class="quiz-sub">Question 1 / 20</p>
       <p class="quiz-sub">What word means:</p>
-      <p id="examMeaning" class="pron-word" style="font-size:1.15rem;"></p>
-      <p id="examBn" class="pron-bn"></p>
-      <input id="examInput" type="text" placeholder="Type the word..." autocomplete="off" />
-      <button id="examSubmit" class="quiz-submit">Submit answer</button>
-      <p id="examFeedback" class="quiz-feedback"></p>
+      <p id="sprintExamMeaning" class="pron-word" style="font-size:1.15rem;"></p>
+      <p id="sprintExamBn" class="pron-bn"></p>
+      <input id="sprintExamInput" type="text" placeholder="Type the word..." autocomplete="off" />
+      <button id="sprintExamSubmit" class="quiz-submit">Submit answer</button>
+      <p id="sprintExamFeedback" class="quiz-feedback"></p>
     </div>
 
-    <div id="examResults" class="hidden">
-      <p class="pron-word" id="examScoreLine"></p>
-      <div id="examMissedList" class="daily-word-list"></div>
-      <button id="examCloseResults" class="quiz-submit">Close</button>
+    <div id="sprintExamResults" class="hidden">
+      <p class="pron-word" id="sprintExamScoreLine"></p>
+      <p id="sprintExamVerdict" class="quiz-sub"></p>
+      <div id="sprintExamMissedList" class="daily-word-list"></div>
+      <button id="sprintExamRetryBtn" class="quiz-submit hidden">🔁 Retry exam</button>
+      <button id="sprintExamNextBtn" class="quiz-submit hidden">▶ Start next batch</button>
+      <button id="sprintExamCloseResults" class="quiz-submit">Close</button>
     </div>
   </div>
 </div>

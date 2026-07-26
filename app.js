@@ -1,18 +1,40 @@
 // ---------- State ----------
 const LS_LEARNED = "vocabmaster_learned";
+const LS_LEARNED_LOG = "vocabmaster_learned_log";
 const LS_FAVORITES = "vocabmaster_favorites";
 const LS_THEME = "vocabmaster_theme";
 
 let activeGroup = "all";
+let activeLetter = null;
 let searchTerm = "";
 let showFavOnly = false;
 let showImpOnly = false;
 let showDoneOnly = false;
 let learned = new Set(JSON.parse(localStorage.getItem(LS_LEARNED) || "[]"));
 let favorites = new Set(JSON.parse(localStorage.getItem(LS_FAVORITES) || "[]"));
+// learnedLog maps word -> date-first-marked-done ("YYYY-MM-DD"), used to build the
+// 3-Day Review Exam pool ("words completed in the last 3 days").
+let learnedLog = JSON.parse(localStorage.getItem(LS_LEARNED_LOG) || "{}");
+
+function persistLearned() {
+  localStorage.setItem(LS_LEARNED, JSON.stringify([...learned]));
+  localStorage.setItem(LS_LEARNED_LOG, JSON.stringify(learnedLog));
+}
+function markLearned(word) {
+  learned.add(word);
+  learnedLog[word] = getTodayStr();
+  persistLearned();
+  maybeUpdateStreakOnComplete();
+}
+function unmarkLearned(word) {
+  learned.delete(word);
+  delete learnedLog[word];
+  persistLearned();
+}
 
 const grid = document.getElementById("cardGrid");
 const groupTabsEl = document.getElementById("groupTabs");
+const alphaBarEl = document.getElementById("alphaBar");
 const emptyState = document.getElementById("emptyState");
 const progressFill = document.getElementById("progressFill");
 const progressLabel = document.getElementById("progressLabel");
@@ -96,7 +118,39 @@ function renderGroupTabs() {
   groupTabsEl.querySelectorAll(".group-tab").forEach(btn => {
     btn.addEventListener("click", () => {
       activeGroup = btn.dataset.group;
+      activeLetter = null;
       renderGroupTabs();
+      renderAlphaBar();
+      renderCards();
+    });
+  });
+}
+
+function renderAlphaBar() {
+  const groupWords = VOCAB.filter(v => activeGroup === "all" || v.g === activeGroup);
+  const counts = {};
+  groupWords.forEach(v => {
+    const letter = v.w.charAt(0).toUpperCase();
+    counts[letter] = (counts[letter] || 0) + 1;
+  });
+
+  const allBtn = `<button class="alpha-btn all-btn ${activeLetter === null ? "active" : ""}" data-letter="">All</button>`;
+  const letterBtns = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    .split("")
+    .map(letter => {
+      const count = counts[letter] || 0;
+      const active = activeLetter === letter ? "active" : "";
+      return `<button class="alpha-btn ${active}" data-letter="${letter}" ${count === 0 ? "disabled" : ""} title="${count} word${count === 1 ? "" : "s"}">${letter}</button>`;
+    })
+    .join("");
+
+  alphaBarEl.innerHTML = allBtn + letterBtns;
+
+  alphaBarEl.querySelectorAll(".alpha-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const letter = btn.dataset.letter;
+      activeLetter = letter === "" ? null : activeLetter === letter ? null : letter;
+      renderAlphaBar();
       renderCards();
     });
   });
@@ -106,6 +160,7 @@ function filteredVocab() {
   return VOCAB.filter(v => {
     const groupMatch = activeGroup === "all" || v.g === activeGroup;
     if (!groupMatch) return false;
+    if (activeLetter && v.w.charAt(0).toUpperCase() !== activeLetter) return false;
     if (showFavOnly && !favorites.has(v.w)) return false;
     if (showImpOnly && v.imp !== 3) return false;
     if (showDoneOnly && !learned.has(v.w)) return false;
@@ -133,7 +188,7 @@ function cardTemplate(v) {
   const fallbackDisplay = v.emoji || v.w.charAt(0).toUpperCase();
   const groupInfo = VOCAB_GROUPS.find(g => g.id === v.g);
   return `
-    <div class="vocab-card" data-word="${v.w}">
+    <div class="vocab-card ${isLearned ? "is-done" : ""}" data-word="${v.w}">
       <div class="card-inner">
         <div class="card-face card-front">
           <div class="card-top-row">
@@ -179,52 +234,95 @@ function cardTemplate(v) {
     </div>`;
 }
 
-function renderCards() {
-  const list = filteredVocab();
-  emptyState.classList.toggle("hidden", list.length > 0);
-  grid.innerHTML = list.map(cardTemplate).join("");
-  renderProgress();
-
-  grid.querySelectorAll(".vocab-card").forEach(cardEl => {
+// ---------- Card grid: event delegation (one listener per container, not per card) ----------
+// With up to ~1700 cards, attaching 5 listeners per card (8500+ listeners) on every
+// render was the main cause of slowness. A single delegated listener handles clicks
+// for every card ever rendered into a container, current or future (e.g. lazy-loaded).
+function attachVocabCardDelegation(containerEl, handlers) {
+  containerEl.addEventListener("click", e => {
+    const cardEl = e.target.closest(".vocab-card");
+    if (!cardEl) return;
     const word = cardEl.dataset.word;
     const vocabItem = VOCAB.find(v => v.w === word);
-
-    cardEl.addEventListener("click", e => {
-      if (e.target.closest("[data-action]")) return;
+    if (!vocabItem) return;
+    const actionBtn = e.target.closest("[data-action]");
+    if (!actionBtn) {
       cardEl.classList.toggle("flipped");
-    });
-
-    cardEl.querySelector('[data-action="zoom"]').addEventListener("click", e => {
-      e.stopPropagation();
-      openLightbox(vocabItem);
-    });
-
-    cardEl.querySelector('[data-action="speak"]').addEventListener("click", e => {
-      e.stopPropagation();
-      speak(vocabItem.w);
-    });
-
-    cardEl.querySelector('[data-action="practice"]').addEventListener("click", e => {
-      e.stopPropagation();
-      openPronModal(vocabItem);
-    });
-
-    cardEl.querySelector('[data-action="learn"]').addEventListener("click", e => {
-      e.stopPropagation();
-      if (learned.has(word)) learned.delete(word);
-      else learned.add(word);
-      localStorage.setItem(LS_LEARNED, JSON.stringify([...learned]));
-      renderCards();
-    });
-
-    cardEl.querySelector('[data-action="fav"]').addEventListener("click", e => {
-      e.stopPropagation();
+      return;
+    }
+    e.stopPropagation();
+    const action = actionBtn.dataset.action;
+    if (action === "zoom") return openLightbox(vocabItem);
+    if (action === "speak") return speak(vocabItem.w);
+    if (action === "practice") return openPronModal(vocabItem);
+    if (action === "learn") {
+      if (learned.has(word)) unmarkLearned(word);
+      else markLearned(word);
+      handlers.onToggle(action, word, cardEl, vocabItem);
+      return;
+    }
+    if (action === "fav") {
       if (favorites.has(word)) favorites.delete(word);
       else favorites.add(word);
       localStorage.setItem(LS_FAVORITES, JSON.stringify([...favorites]));
-      renderCards();
-    });
+      handlers.onToggle(action, word, cardEl, vocabItem);
+      return;
+    }
   });
+}
+
+// Swap a single card's DOM for a freshly-rendered version (used after fav/learn
+// toggles) instead of rebuilding the whole grid — keeps scroll position and any
+// lazy-loaded pages intact.
+function refreshCardInPlace(cardEl, vocabItem) {
+  const wasFlipped = cardEl.classList.contains("flipped");
+  const tmp = document.createElement("div");
+  tmp.innerHTML = cardTemplate(vocabItem);
+  const freshEl = tmp.firstElementChild;
+  if (wasFlipped) freshEl.classList.add("flipped");
+  cardEl.replaceWith(freshEl);
+}
+
+// ---------- Main grid: paginated / lazy rendering ----------
+const PAGE_SIZE = 60;
+let currentFilteredList = [];
+let renderedCount = 0;
+
+function renderCards() {
+  currentFilteredList = filteredVocab();
+  emptyState.classList.toggle("hidden", currentFilteredList.length > 0);
+  renderedCount = Math.min(PAGE_SIZE, currentFilteredList.length);
+  grid.innerHTML = currentFilteredList.slice(0, renderedCount).map(cardTemplate).join("");
+  renderProgress();
+}
+
+function appendMoreCards() {
+  if (renderedCount >= currentFilteredList.length) return;
+  const next = currentFilteredList.slice(renderedCount, renderedCount + PAGE_SIZE);
+  grid.insertAdjacentHTML("beforeend", next.map(cardTemplate).join(""));
+  renderedCount += next.length;
+}
+
+attachVocabCardDelegation(grid, {
+  onToggle(action, word, cardEl, vocabItem) {
+    // If the active filter is defined by the very attribute we just toggled
+    // (e.g. "Favorites only" + un-favoriting), the card must disappear from
+    // this view, which changes the list itself — needs a full re-render.
+    const listChanged = (action === "fav" && showFavOnly) || (action === "learn" && showDoneOnly);
+    if (listChanged) {
+      renderCards();
+      return;
+    }
+    refreshCardInPlace(cardEl, vocabItem);
+    renderProgress();
+  },
+});
+
+const loadMoreSentinel = document.getElementById("loadMoreSentinel");
+if ("IntersectionObserver" in window && loadMoreSentinel) {
+  new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) appendMoreCards();
+  }, { rootMargin: "800px" }).observe(loadMoreSentinel);
 }
 
 // ---------- Search ----------
@@ -309,9 +407,8 @@ document.getElementById("pronRecord").addEventListener("click", function () {
       pronResult.textContent = "✅ Great pronunciation!";
       pronResult.style.color = "var(--accent-2)";
       replayAnimation(pronResult, "feedback-bounce");
-      learned.add(currentPronItem.w);
-      localStorage.setItem(LS_LEARNED, JSON.stringify([...learned]));
-      renderCards();
+      markLearned(currentPronItem.w);
+      refreshVisibleWordViews();
     } else if (best.score >= 0.5) {
       pronResult.textContent = "🙂 Close! Try again, listen closely.";
       pronResult.style.color = "#f5b301";
@@ -376,20 +473,47 @@ function checkQuizAnswer() {
   quizScoreEl.textContent = `Score: ${quizScore.correct} / ${quizScore.total}`;
 }
 
-// ---------- Daily Challenge (gamification) ----------
+// ---------- Full-page navigation (Daily Learn / Exams replace the grid, not popups) ----------
+const dailyPageEl = document.getElementById("dailyPage");
+const examPageEl = document.getElementById("examPage");
+const mainViewEls = [groupTabsEl, alphaBarEl, document.querySelector(".filter-row"), document.querySelector(".progress-row"), grid, loadMoreSentinel, emptyState];
+const fullPageEls = [dailyPageEl, examPageEl];
+
+function showFullPage(pageEl) {
+  mainViewEls.forEach(el => el && el.classList.add("hidden"));
+  fullPageEls.forEach(el => el.classList.add("hidden"));
+  pageEl.classList.remove("hidden");
+}
+function returnToMainView() {
+  fullPageEls.forEach(el => el.classList.add("hidden"));
+  mainViewEls.forEach(el => el && el.classList.remove("hidden"));
+  emptyState.classList.toggle("hidden", currentFilteredList.length > 0 || filteredVocab().length > 0);
+}
+// Pronunciation practice can be opened from either the main grid or the Daily
+// Learn page (both use the same pron modal) — refresh whichever is visible.
+function refreshVisibleWordViews() {
+  renderProgress();
+  if (!dailyPageEl.classList.contains("hidden")) renderDailyPage();
+  else renderCards();
+}
+
+document.getElementById("dailyPageBack").addEventListener("click", returnToMainView);
+document.getElementById("examPageBack").addEventListener("click", returnToMainView);
+
+// ---------- Daily Challenge (full page, shows real vocab cards for today's words) ----------
 const LS_DAILY_TARGET = "vocabmaster_daily_target";
 const LS_DAILY_STATE = "vocabmaster_daily_state";
+const LS_DAILY_HISTORY = "vocabmaster_daily_history";
 const LS_UNSEEN_POOL = "vocabmaster_unseen_pool";
-const LS_PRACTICED_ALL = "vocabmaster_practiced_all";
 const LS_STREAK = "vocabmaster_streak";
-const MIN_EXAM_WORDS = 5;
-const EXAM_LEN = 10;
 const LS_EXAM_STATS = "vocabmaster_exam_stats";
+const REVIEW_WINDOW_DAYS = 3;
+const EXAM_LEN_CAP = 20;
 
 let dailyTarget = parseInt(localStorage.getItem(LS_DAILY_TARGET) || "0", 10);
 let dailyState = JSON.parse(localStorage.getItem(LS_DAILY_STATE) || "null");
+let dailyHistory = JSON.parse(localStorage.getItem(LS_DAILY_HISTORY) || "{}"); // { "YYYY-MM-DD": [words] }
 let unseenPool = JSON.parse(localStorage.getItem(LS_UNSEEN_POOL) || "null");
-let practicedAll = new Set(JSON.parse(localStorage.getItem(LS_PRACTICED_ALL) || "[]"));
 let streakData = JSON.parse(localStorage.getItem(LS_STREAK) || '{"count":0,"lastCompletedDate":null}');
 let examStats = JSON.parse(localStorage.getItem(LS_EXAM_STATS) || '{"examsTaken":0,"totalCorrect":0,"totalQuestions":0,"bestPct":0,"history":[]}');
 function saveExamStats() { localStorage.setItem(LS_EXAM_STATS, JSON.stringify(examStats)); }
@@ -413,8 +537,12 @@ function shuffle(arr) {
 
 function saveDailyState() { localStorage.setItem(LS_DAILY_STATE, JSON.stringify(dailyState)); }
 function saveUnseenPool() { localStorage.setItem(LS_UNSEEN_POOL, JSON.stringify(unseenPool)); }
-function savePracticedAll() { localStorage.setItem(LS_PRACTICED_ALL, JSON.stringify([...practicedAll])); }
 function saveStreak() { localStorage.setItem(LS_STREAK, JSON.stringify(streakData)); }
+function saveDailyHistory() {
+  const dates = Object.keys(dailyHistory).sort();
+  while (dates.length > 14) delete dailyHistory[dates.shift()];
+  localStorage.setItem(LS_DAILY_HISTORY, JSON.stringify(dailyHistory));
+}
 
 function generateDailyWords(target) {
   if (!unseenPool || unseenPool.length === 0) unseenPool = shuffle(VOCAB.map(v => v.w));
@@ -425,17 +553,24 @@ function generateDailyWords(target) {
   return picked;
 }
 
+function recordDailyBatch(date, words) {
+  dailyHistory[date] = words;
+  saveDailyHistory();
+}
+
 function ensureDailyState() {
   const today = getTodayStr();
   if (dailyState && dailyState.date === today) return dailyState;
   const words = generateDailyWords(dailyTarget);
-  dailyState = { date: today, target: dailyTarget, words, practiced: [] };
+  dailyState = { date: today, target: dailyTarget, words };
   saveDailyState();
+  recordDailyBatch(today, words);
   return dailyState;
 }
 
 function maybeUpdateStreakOnComplete() {
-  if (dailyState.practiced.length !== dailyState.words.length || dailyState.words.length === 0) return;
+  if (!dailyState || dailyState.words.length === 0) return;
+  if (!dailyState.words.every(w => learned.has(w))) return;
   if (streakData.lastCompletedDate === dailyState.date) return;
   const yesterday = getYesterdayStr(dailyState.date);
   streakData.count = streakData.lastCompletedDate === yesterday ? streakData.count + 1 : 1;
@@ -444,33 +579,16 @@ function maybeUpdateStreakOnComplete() {
 }
 
 const dailyBtn = document.getElementById("dailyBtn");
-const dailyModal = document.getElementById("dailyModal");
-const dailyClose = document.getElementById("dailyClose");
 const dailySetupEl = document.getElementById("dailySetup");
 const dailyActiveEl = document.getElementById("dailyActive");
 const dailyTargetInput = document.getElementById("dailyTargetInput");
 const dailyStartBtn = document.getElementById("dailyStartBtn");
 const streakBadge = document.getElementById("streakBadge");
 const dailyProgressLabel = document.getElementById("dailyProgressLabel");
-const dailyWordListEl = document.getElementById("dailyWordList");
+const dailyWordGridEl = document.getElementById("dailyWordGrid");
 const dailyChangeTarget = document.getElementById("dailyChangeTarget");
-const startExamBtn = document.getElementById("startExamBtn");
-const examHint = document.getElementById("examHint");
 
-function dailyWordItemHtml(word) {
-  const v = VOCAB.find(x => x.w === word);
-  const done = dailyState.practiced.includes(word);
-  return `<div class="daily-word-item ${done ? "done" : ""}" data-word="${word}">
-    <button class="daily-check ${done ? "checked" : ""}" data-action="daily-check" title="Mark practiced">${done ? "✓" : ""}</button>
-    <div class="daily-word-main">
-      <div class="daily-word-title">${v.w} <span style="color:var(--muted);font-weight:400;font-size:.8rem;">${v.ipa}</span></div>
-      <div class="daily-word-bn">${v.bn} — ${v.meaning}</div>
-    </div>
-    <button class="mini-btn" data-action="daily-speak" style="flex:none;padding:6px 10px;">🔊</button>
-  </div>`;
-}
-
-function renderDailyModal() {
+function renderDailyPage() {
   if (!dailyTarget) {
     dailySetupEl.classList.remove("hidden");
     dailyActiveEl.classList.add("hidden");
@@ -481,43 +599,22 @@ function renderDailyModal() {
   dailySetupEl.classList.add("hidden");
   dailyActiveEl.classList.remove("hidden");
   streakBadge.textContent = `🔥 ${streakData.count} day streak`;
-  dailyProgressLabel.textContent = `${dailyState.practiced.length} / ${dailyState.words.length} practiced today`;
-  dailyWordListEl.innerHTML = dailyState.words.map(dailyWordItemHtml).join("");
-
-  if (practicedAll.size < MIN_EXAM_WORDS) {
-    startExamBtn.textContent = "🔒 Take Review Exam";
-    examHint.textContent = `Practice at least ${MIN_EXAM_WORDS} words first (so far: ${practicedAll.size}). Tap ✓ on words above.`;
-    examHint.style.color = "var(--muted)";
-  } else {
-    startExamBtn.textContent = "📝 Take Review Exam";
-    examHint.textContent = `Exam pool ready — ${practicedAll.size} practiced words to draw from.`;
-    examHint.style.color = "var(--muted)";
-  }
-
-  dailyWordListEl.querySelectorAll(".daily-word-item").forEach(itemEl => {
-    const word = itemEl.dataset.word;
-    itemEl.querySelector('[data-action="daily-speak"]').addEventListener("click", () => speak(word));
-    itemEl.querySelector('[data-action="daily-check"]').addEventListener("click", () => {
-      const idx = dailyState.practiced.indexOf(word);
-      if (idx === -1) {
-        dailyState.practiced.push(word);
-        practicedAll.add(word);
-        savePracticedAll();
-      } else {
-        dailyState.practiced.splice(idx, 1);
-      }
-      saveDailyState();
-      maybeUpdateStreakOnComplete();
-      renderDailyModal();
-    });
-  });
+  const doneCount = dailyState.words.filter(w => learned.has(w)).length;
+  dailyProgressLabel.textContent = `${doneCount} / ${dailyState.words.length} done today`;
+  dailyWordGridEl.innerHTML = dailyState.words.map(w => cardTemplate(VOCAB.find(v => v.w === w))).join("");
 }
 
-dailyBtn.addEventListener("click", () => {
-  renderDailyModal();
-  dailyModal.classList.remove("hidden");
+attachVocabCardDelegation(dailyWordGridEl, {
+  onToggle() {
+    renderDailyPage();
+    renderProgress();
+  },
 });
-dailyClose.addEventListener("click", () => dailyModal.classList.add("hidden"));
+
+dailyBtn.addEventListener("click", () => {
+  renderDailyPage();
+  showFullPage(dailyPageEl);
+});
 dailyStartBtn.addEventListener("click", () => {
   const val = Math.max(1, Math.min(30, parseInt(dailyTargetInput.value, 10) || 5));
   dailyTarget = val;
@@ -526,9 +623,10 @@ dailyStartBtn.addEventListener("click", () => {
   // makes "reset today's challenge" actually work instead of silently no-op-ing
   // when a dailyState for today already exists.
   const words = generateDailyWords(val);
-  dailyState = { date: getTodayStr(), target: val, words, practiced: [] };
+  dailyState = { date: getTodayStr(), target: val, words };
   saveDailyState();
-  renderDailyModal();
+  recordDailyBatch(dailyState.date, words);
+  renderDailyPage();
 });
 dailyChangeTarget.addEventListener("click", () => {
   dailySetupEl.classList.remove("hidden");
@@ -536,9 +634,27 @@ dailyChangeTarget.addEventListener("click", () => {
   dailyTargetInput.value = dailyTarget;
 });
 
-// ---------- Review Exam ----------
-const examModal = document.getElementById("examModal");
-const examClose = document.getElementById("examClose");
+// ---------- Exams (full page): Daily Exam (yesterday's words) + 3-Day Review Exam (all done words in the current window) ----------
+const LS_REVIEW_WINDOW = "vocabmaster_review_window";
+let reviewWindow = JSON.parse(localStorage.getItem(LS_REVIEW_WINDOW) || "null") || { windowStart: getTodayStr() };
+function saveReviewWindow() { localStorage.setItem(LS_REVIEW_WINDOW, JSON.stringify(reviewWindow)); }
+
+function dailyExamPool() {
+  return dailyHistory[getYesterdayStr(getTodayStr())] || [];
+}
+function threeDayExamPool() {
+  return Object.keys(learnedLog).filter(w => learnedLog[w] >= reviewWindow.windowStart);
+}
+function threeDayExamUnlocked() {
+  return daysBetween(reviewWindow.windowStart, getTodayStr()) >= REVIEW_WINDOW_DAYS;
+}
+
+const examsBtn = document.getElementById("examsBtn");
+const examChooserEl = document.getElementById("examChooser");
+const dailyExamHint = document.getElementById("dailyExamHint");
+const startDailyExamBtn = document.getElementById("startDailyExamBtn");
+const threeDayExamHint = document.getElementById("threeDayExamHint");
+const start3DayExamBtn = document.getElementById("start3DayExamBtn");
 const examRunningEl = document.getElementById("examRunning");
 const examResultsEl = document.getElementById("examResults");
 const examProgressLabel = document.getElementById("examProgressLabel");
@@ -554,6 +670,33 @@ let examQuestions = [];
 let examIndex = 0;
 let examScore = 0;
 let examMissed = [];
+let currentExamMode = "daily";
+
+function renderExamChooser() {
+  examChooserEl.classList.remove("hidden");
+  examRunningEl.classList.add("hidden");
+  examResultsEl.classList.add("hidden");
+
+  const dPool = dailyExamPool();
+  dailyExamHint.textContent = dPool.length
+    ? `${dPool.length} word${dPool.length === 1 ? "" : "s"} from yesterday's Daily Challenge, ready to test.`
+    : "No Daily Challenge words from yesterday yet — use Daily Challenge, then come back tomorrow.";
+  startDailyExamBtn.disabled = dPool.length === 0;
+
+  const tPool = threeDayExamPool();
+  const unlocked = threeDayExamUnlocked();
+  if (!unlocked) {
+    const daysLeft = REVIEW_WINDOW_DAYS - daysBetween(reviewWindow.windowStart, getTodayStr());
+    threeDayExamHint.textContent = `Unlocks in ${daysLeft} day${daysLeft === 1 ? "" : "s"} — ${tPool.length} word${tPool.length === 1 ? "" : "s"} completed so far this window.`;
+    start3DayExamBtn.disabled = true;
+  } else if (tPool.length === 0) {
+    threeDayExamHint.textContent = "No words completed in this window yet — mark some words done, then come back.";
+    start3DayExamBtn.disabled = true;
+  } else {
+    threeDayExamHint.textContent = `${tPool.length} word${tPool.length === 1 ? "" : "s"} completed this window — ready to test!`;
+    start3DayExamBtn.disabled = false;
+  }
+}
 
 function showExamQuestion() {
   const q = examQuestions[examIndex];
@@ -590,16 +733,17 @@ function checkExamAnswer() {
 function showExamResults() {
   examRunningEl.classList.add("hidden");
   examResultsEl.classList.remove("hidden");
-  examScoreLine.textContent = `You scored ${examScore} / ${examQuestions.length}`;
-
   const pct = Math.round((examScore / examQuestions.length) * 100);
+  examScoreLine.textContent = `You scored ${examScore} / ${examQuestions.length} (${pct}%)`;
+
   examStats.examsTaken += 1;
   examStats.totalCorrect += examScore;
   examStats.totalQuestions += examQuestions.length;
   examStats.bestPct = Math.max(examStats.bestPct, pct);
-  examStats.history.push({ score: examScore, total: examQuestions.length, pct });
+  examStats.history.push({ mode: currentExamMode, score: examScore, total: examQuestions.length, pct });
   if (examStats.history.length > 50) examStats.history = examStats.history.slice(-50);
   saveExamStats();
+
   examMissedList.innerHTML = examMissed.length
     ? examMissed
         .map(
@@ -610,46 +754,319 @@ function showExamResults() {
         )
         .join("")
     : `<p class="quiz-sub">Perfect score! No missed words 🎉</p>`;
+
+  // The 3-Day exam is a periodic checkpoint, not a gate — taking it (any score)
+  // starts a fresh 3-day window for the next one.
+  if (currentExamMode === "threeday") {
+    reviewWindow = { windowStart: getTodayStr() };
+    saveReviewWindow();
+  }
 }
 
-startExamBtn.addEventListener("click", () => {
-  if (practicedAll.size < MIN_EXAM_WORDS) {
-    examHint.textContent = `⚠️ You need ${MIN_EXAM_WORDS - practicedAll.size} more practiced word(s) first — tap ✓ next to a word above, then try again.`;
-    examHint.style.color = "var(--danger)";
-    return;
-  }
-  const poolWords = shuffle([...practicedAll]);
-  examQuestions = poolWords
-    .map(w => VOCAB.find(v => v.w === w))
-    .filter(Boolean)
-    .slice(0, EXAM_LEN);
-  if (examQuestions.length === 0) {
-    examHint.textContent = "⚠️ Couldn't build an exam from your practiced words. Try practicing a few more.";
-    examHint.style.color = "var(--danger)";
-    return;
-  }
+function startExam(mode, pool) {
+  currentExamMode = mode;
+  examQuestions = shuffle(pool.map(w => VOCAB.find(v => v.w === w)).filter(Boolean)).slice(0, EXAM_LEN_CAP);
+  if (examQuestions.length === 0) return;
   examIndex = 0;
   examScore = 0;
   examMissed = [];
-  dailyModal.classList.add("hidden");
-  examRunningEl.classList.remove("hidden");
+  examChooserEl.classList.add("hidden");
   examResultsEl.classList.add("hidden");
-  examModal.classList.remove("hidden");
+  examRunningEl.classList.remove("hidden");
   showExamQuestion();
-});
+}
 
+examsBtn.addEventListener("click", () => {
+  renderExamChooser();
+  showFullPage(examPageEl);
+});
+startDailyExamBtn.addEventListener("click", () => {
+  if (startDailyExamBtn.disabled) return;
+  startExam("daily", dailyExamPool());
+});
+start3DayExamBtn.addEventListener("click", () => {
+  if (start3DayExamBtn.disabled) return;
+  startExam("threeday", threeDayExamPool());
+});
 examSubmit.addEventListener("click", checkExamAnswer);
 examInput.addEventListener("keydown", e => {
   if (e.key === "Enter") checkExamAnswer();
 });
+document.getElementById("examBackToChooser").addEventListener("click", renderExamChooser);
 
-function closeExamAndReturn() {
-  examModal.classList.add("hidden");
-  renderDailyModal();
-  dailyModal.classList.remove("hidden");
+// ---------- Priority Sprint (high-priority words, fixed 3-day batches gated by exam) ----------
+const LS_SPRINT_STATE = "vocabmaster_sprint_state";
+const SPRINT_MIN_BATCH = 15;
+const SPRINT_MAX_BATCH = 20;
+const SPRINT_CYCLE_DAYS = 3;
+const SPRINT_PASS_PCT = 70;
+
+let sprintState = JSON.parse(localStorage.getItem(LS_SPRINT_STATE) || "null");
+function saveSprintState() { localStorage.setItem(LS_SPRINT_STATE, JSON.stringify(sprintState)); }
+
+function daysBetween(dateStr1, dateStr2) {
+  const d1 = new Date(`${dateStr1}T00:00:00`);
+  const d2 = new Date(`${dateStr2}T00:00:00`);
+  return Math.round((d2 - d1) / 86400000);
 }
-examClose.addEventListener("click", closeExamAndReturn);
-document.getElementById("examCloseResults").addEventListener("click", closeExamAndReturn);
+
+function sprintPool() {
+  return VOCAB.filter(v => v.imp === 3 && !learned.has(v.w)).map(v => v.w);
+}
+
+function generateSprintBatch(batchSize, cycleNumber) {
+  const words = shuffle(sprintPool()).slice(0, batchSize);
+  return { batchSize, words, startDate: getTodayStr(), cycleNumber, practiced: [] };
+}
+
+function sprintExamUnlocked() {
+  return !!sprintState && daysBetween(sprintState.startDate, getTodayStr()) >= SPRINT_CYCLE_DAYS;
+}
+
+const sprintBtn = document.getElementById("sprintBtn");
+const sprintModal = document.getElementById("sprintModal");
+const sprintClose = document.getElementById("sprintClose");
+const sprintSetupEl = document.getElementById("sprintSetup");
+const sprintActiveEl = document.getElementById("sprintActive");
+const sprintDoneEl = document.getElementById("sprintDone");
+const sprintSizeInput = document.getElementById("sprintSizeInput");
+const sprintStartBtn = document.getElementById("sprintStartBtn");
+const sprintCycleBadge = document.getElementById("sprintCycleBadge");
+const sprintDayLabel = document.getElementById("sprintDayLabel");
+const sprintWordListEl = document.getElementById("sprintWordList");
+const sprintTakeExamBtn = document.getElementById("sprintTakeExamBtn");
+const sprintExamHint = document.getElementById("sprintExamHint");
+
+function sprintWordItemHtml(word) {
+  const v = VOCAB.find(x => x.w === word);
+  if (!v) return "";
+  const done = sprintState.practiced.includes(word);
+  return `<div class="daily-word-item ${done ? "done" : ""}" data-word="${word}">
+    <button class="daily-check ${done ? "checked" : ""}" data-action="sprint-check" title="Mark practiced">${done ? "✓" : ""}</button>
+    <div class="daily-word-main">
+      <div class="daily-word-title">${v.w} <span style="color:var(--muted);font-weight:400;font-size:.8rem;">${v.ipa}</span></div>
+      <div class="daily-word-bn">${v.bn} — ${v.meaning}</div>
+    </div>
+    <button class="mini-btn" data-action="sprint-speak" style="flex:none;padding:6px 10px;">🔊</button>
+  </div>`;
+}
+
+function renderSprintModal() {
+  if (!sprintState) {
+    sprintSetupEl.classList.remove("hidden");
+    sprintActiveEl.classList.add("hidden");
+    sprintDoneEl.classList.add("hidden");
+    return;
+  }
+  sprintSetupEl.classList.add("hidden");
+  sprintDoneEl.classList.add("hidden");
+  sprintActiveEl.classList.remove("hidden");
+
+  sprintCycleBadge.textContent = `📦 Batch #${sprintState.cycleNumber}`;
+  const elapsed = daysBetween(sprintState.startDate, getTodayStr());
+  const unlocked = sprintExamUnlocked();
+  sprintDayLabel.textContent = unlocked ? "Exam unlocked! 🔓" : `Day ${Math.min(elapsed + 1, SPRINT_CYCLE_DAYS)} of ${SPRINT_CYCLE_DAYS}`;
+
+  sprintWordListEl.innerHTML = sprintState.words.map(sprintWordItemHtml).join("");
+
+  if (unlocked) {
+    sprintTakeExamBtn.textContent = "📝 Take Sprint Exam";
+    sprintTakeExamBtn.disabled = false;
+    sprintExamHint.textContent = `Score ${SPRINT_PASS_PCT}%+ on these ${sprintState.words.length} words to unlock your next batch.`;
+    sprintExamHint.style.color = "var(--muted)";
+  } else {
+    const daysLeft = SPRINT_CYCLE_DAYS - elapsed;
+    sprintTakeExamBtn.textContent = "🔒 Exam locked";
+    sprintTakeExamBtn.disabled = true;
+    sprintExamHint.textContent = `Keep studying — exam unlocks in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.`;
+    sprintExamHint.style.color = "var(--muted)";
+  }
+
+  sprintWordListEl.querySelectorAll(".daily-word-item").forEach(itemEl => {
+    const word = itemEl.dataset.word;
+    itemEl.querySelector('[data-action="sprint-speak"]').addEventListener("click", () => speak(word));
+    itemEl.querySelector('[data-action="sprint-check"]').addEventListener("click", () => {
+      const idx = sprintState.practiced.indexOf(word);
+      if (idx === -1) sprintState.practiced.push(word);
+      else sprintState.practiced.splice(idx, 1);
+      saveSprintState();
+      renderSprintModal();
+    });
+  });
+}
+
+sprintBtn.addEventListener("click", () => {
+  if (!sprintState && sprintPool().length === 0) {
+    sprintSetupEl.classList.add("hidden");
+    sprintActiveEl.classList.add("hidden");
+    sprintDoneEl.classList.remove("hidden");
+  } else if (!sprintState) {
+    const availableNow = sprintPool().length;
+    sprintSizeInput.max = String(Math.min(SPRINT_MAX_BATCH, availableNow) || SPRINT_MAX_BATCH);
+    sprintSizeInput.value = String(Math.min(SPRINT_MAX_BATCH, availableNow));
+    renderSprintModal();
+  } else {
+    renderSprintModal();
+  }
+  sprintModal.classList.remove("hidden");
+});
+sprintClose.addEventListener("click", () => sprintModal.classList.add("hidden"));
+
+sprintStartBtn.addEventListener("click", () => {
+  const pool = sprintPool();
+  if (pool.length === 0) {
+    sprintSetupEl.classList.add("hidden");
+    sprintDoneEl.classList.remove("hidden");
+    return;
+  }
+  const size = Math.max(SPRINT_MIN_BATCH, Math.min(SPRINT_MAX_BATCH, parseInt(sprintSizeInput.value, 10) || SPRINT_MAX_BATCH));
+  sprintState = generateSprintBatch(Math.min(size, pool.length), 1);
+  saveSprintState();
+  renderSprintModal();
+});
+
+// ---------- Priority Sprint exam ----------
+const sprintExamModal = document.getElementById("sprintExamModal");
+const sprintExamClose = document.getElementById("sprintExamClose");
+const sprintExamRunningEl = document.getElementById("sprintExamRunning");
+const sprintExamResultsEl = document.getElementById("sprintExamResults");
+const sprintExamProgressLabel = document.getElementById("sprintExamProgressLabel");
+const sprintExamMeaning = document.getElementById("sprintExamMeaning");
+const sprintExamBn = document.getElementById("sprintExamBn");
+const sprintExamInput = document.getElementById("sprintExamInput");
+const sprintExamSubmit = document.getElementById("sprintExamSubmit");
+const sprintExamFeedback = document.getElementById("sprintExamFeedback");
+const sprintExamScoreLine = document.getElementById("sprintExamScoreLine");
+const sprintExamVerdict = document.getElementById("sprintExamVerdict");
+const sprintExamMissedList = document.getElementById("sprintExamMissedList");
+const sprintExamRetryBtn = document.getElementById("sprintExamRetryBtn");
+const sprintExamNextBtn = document.getElementById("sprintExamNextBtn");
+
+let sprintExamQuestions = [];
+let sprintExamIndex = 0;
+let sprintExamScoreVal = 0;
+let sprintExamMissed = [];
+
+function buildSprintExamQuestions() {
+  return shuffle(sprintState.words.map(w => VOCAB.find(v => v.w === w)).filter(Boolean));
+}
+
+function showSprintExamQuestion() {
+  const q = sprintExamQuestions[sprintExamIndex];
+  sprintExamProgressLabel.textContent = `Question ${sprintExamIndex + 1} / ${sprintExamQuestions.length}`;
+  sprintExamMeaning.textContent = q.meaning;
+  sprintExamBn.textContent = q.bn;
+  sprintExamInput.value = "";
+  sprintExamFeedback.textContent = "";
+  sprintExamInput.focus();
+}
+
+function checkSprintExamAnswer() {
+  if (sprintExamIndex >= sprintExamQuestions.length) return;
+  const q = sprintExamQuestions[sprintExamIndex];
+  const correct = sprintExamInput.value.trim().toLowerCase() === q.w.toLowerCase();
+  if (correct) {
+    sprintExamScoreVal++;
+    sprintExamFeedback.textContent = "✅ Correct!";
+    sprintExamFeedback.style.color = "var(--accent-2)";
+    replayAnimation(sprintExamFeedback, "feedback-bounce");
+  } else {
+    sprintExamMissed.push(q);
+    sprintExamFeedback.textContent = `❌ It was "${q.w}"`;
+    sprintExamFeedback.style.color = "var(--danger)";
+    replayAnimation(sprintExamFeedback, "feedback-shake");
+  }
+  sprintExamIndex++;
+  setTimeout(() => {
+    if (sprintExamIndex >= sprintExamQuestions.length) showSprintExamResults();
+    else showSprintExamQuestion();
+  }, 900);
+}
+
+function showSprintExamResults() {
+  sprintExamRunningEl.classList.add("hidden");
+  sprintExamResultsEl.classList.remove("hidden");
+  const pct = Math.round((sprintExamScoreVal / sprintExamQuestions.length) * 100);
+  sprintExamScoreLine.textContent = `You scored ${sprintExamScoreVal} / ${sprintExamQuestions.length} (${pct}%)`;
+
+  sprintExamMissedList.innerHTML = sprintExamMissed.length
+    ? sprintExamMissed
+        .map(
+          q => `<div class="daily-word-item"><div class="daily-word-main">
+            <div class="daily-word-title">${q.w}</div>
+            <div class="daily-word-bn">${q.bn} — ${q.meaning}</div>
+          </div></div>`
+        )
+        .join("")
+    : `<p class="quiz-sub">Perfect score! No missed words 🎉</p>`;
+
+  if (pct >= SPRINT_PASS_PCT) {
+    sprintExamVerdict.textContent = `🎉 Passed! (need ${SPRINT_PASS_PCT}%+) These words are now marked done.`;
+    sprintExamVerdict.style.color = "var(--accent-2)";
+    sprintState.words.forEach(w => markLearned(w));
+    renderCards();
+    sprintExamRetryBtn.classList.add("hidden");
+    sprintExamNextBtn.classList.remove("hidden");
+  } else {
+    sprintExamVerdict.textContent = `Not quite — need ${SPRINT_PASS_PCT}%+ to unlock the next batch. Keep studying and retry anytime.`;
+    sprintExamVerdict.style.color = "var(--danger)";
+    sprintExamRetryBtn.classList.remove("hidden");
+    sprintExamNextBtn.classList.add("hidden");
+  }
+}
+
+sprintTakeExamBtn.addEventListener("click", () => {
+  if (sprintTakeExamBtn.disabled) return;
+  sprintExamQuestions = buildSprintExamQuestions();
+  sprintExamIndex = 0;
+  sprintExamScoreVal = 0;
+  sprintExamMissed = [];
+  sprintModal.classList.add("hidden");
+  sprintExamRunningEl.classList.remove("hidden");
+  sprintExamResultsEl.classList.add("hidden");
+  sprintExamModal.classList.remove("hidden");
+  showSprintExamQuestion();
+});
+
+sprintExamSubmit.addEventListener("click", checkSprintExamAnswer);
+sprintExamInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") checkSprintExamAnswer();
+});
+
+sprintExamRetryBtn.addEventListener("click", () => {
+  sprintExamQuestions = buildSprintExamQuestions();
+  sprintExamIndex = 0;
+  sprintExamScoreVal = 0;
+  sprintExamMissed = [];
+  sprintExamRunningEl.classList.remove("hidden");
+  sprintExamResultsEl.classList.add("hidden");
+  showSprintExamQuestion();
+});
+
+sprintExamNextBtn.addEventListener("click", () => {
+  const nextPool = sprintPool();
+  if (nextPool.length === 0) {
+    sprintState = null;
+    saveSprintState();
+    sprintExamModal.classList.add("hidden");
+    sprintModal.classList.remove("hidden");
+    renderSprintModal();
+    return;
+  }
+  sprintState = generateSprintBatch(Math.min(sprintState.batchSize, nextPool.length), sprintState.cycleNumber + 1);
+  saveSprintState();
+  sprintExamModal.classList.add("hidden");
+  sprintModal.classList.remove("hidden");
+  renderSprintModal();
+});
+
+function closeSprintExamAndReturn() {
+  sprintExamModal.classList.add("hidden");
+  renderSprintModal();
+  sprintModal.classList.remove("hidden");
+}
+sprintExamClose.addEventListener("click", closeSprintExamAndReturn);
+document.getElementById("sprintExamCloseResults").addEventListener("click", closeSprintExamAndReturn);
 
 // ---------- Image lightbox ----------
 const imageLightbox = document.getElementById("imageLightbox");
@@ -689,7 +1106,6 @@ function renderStatsGrid() {
   statsGrid.innerHTML = [
     statTile("Words done", `${totalLearned} / ${VOCAB.length}`),
     statTile("Daily streak", `🔥 ${streakData.count}`),
-    statTile("Practiced pool", practicedAll.size),
     statTile("Favorites", favorites.size),
     statTile("Exams taken", examStats.examsTaken),
     statTile("Exam accuracy", examStats.examsTaken ? `${examAccuracy}%` : "—"),
@@ -729,8 +1145,7 @@ function renderDoneWords() {
     const v = VOCAB.find(x => x.w === word);
     itemEl.querySelector('[data-action="zoom"]').addEventListener("click", () => openLightbox(v));
     itemEl.querySelector('[data-action="unlearn"]').addEventListener("click", () => {
-      learned.delete(word);
-      localStorage.setItem(LS_LEARNED, JSON.stringify([...learned]));
+      unmarkLearned(word);
       renderDoneWords();
       renderCards();
     });
@@ -751,4 +1166,5 @@ doneSearch.addEventListener("input", () => {
 
 // ---------- Init ----------
 renderGroupTabs();
+renderAlphaBar();
 renderCards();
