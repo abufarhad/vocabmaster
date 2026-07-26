@@ -157,9 +157,12 @@ function renderAlphaBar() {
 }
 
 function filteredVocab() {
+  const globalScope = showFavOnly || showDoneOnly;
   return VOCAB.filter(v => {
-    const groupMatch = activeGroup === "all" || v.g === activeGroup;
-    if (!groupMatch) return false;
+    if (!globalScope) {
+      const groupMatch = activeGroup === "all" || v.g === activeGroup;
+      if (!groupMatch) return false;
+    }
     if (activeLetter && v.w.charAt(0).toUpperCase() !== activeLetter) return false;
     if (showFavOnly && !favorites.has(v.w)) return false;
     if (showImpOnly && v.imp !== 3) return false;
