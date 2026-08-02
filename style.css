@@ -164,7 +164,7 @@ body {
   outline: none;
   background: transparent;
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 1rem;
 }
 .quiz-btn, .quiz-play, .quiz-submit, .quiz-next, .pron-record {
   border: none;
@@ -268,12 +268,6 @@ body {
   border-color: transparent;
   color: #fff;
   animation: bounceIn 0.3s ease;
-}
-.imp-note {
-  font-size: 0.75rem;
-  color: var(--muted);
-  cursor: help;
-  border-bottom: 1px dotted var(--muted);
 }
 
 .progress-row {
@@ -503,6 +497,8 @@ body {
   padding: 28px;
   max-width: 420px;
   width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: var(--shadow);
   text-align: center;
   animation: modalPop 0.28s cubic-bezier(0.2, 0.8, 0.3, 1.1);
@@ -645,7 +641,7 @@ body {
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  font-size: 0.9rem;
+  font-size: 1rem;
 }
 .done-word-grid { display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
 .done-word-thumb { width: 52px; height: 52px; border-radius: 10px; flex: none; }
@@ -695,8 +691,40 @@ body {
 #examMeaning, #pronWord, .pron-word { animation: fadeInUp 0.3s ease both; }
 
 @media (max-width: 560px) {
-  .topbar { padding: 16px; }
-  .toolbar, .group-tabs, .progress-row, .card-grid { padding-left: 16px; padding-right: 16px; }
+  .dedication { padding: 6px 12px; font-size: 0.76rem; }
+  .topbar { padding: 14px 16px; gap: 10px; }
+  .brand { gap: 10px; }
+  .brand-icon { font-size: 1.8rem; }
+  .brand h1 { font-size: 1.2rem; }
+  .tagline { font-size: 0.78rem; }
+
+  .toolbar, .group-tabs, .alpha-bar, .filter-row, .progress-row, .card-grid, .full-page {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .toolbar { padding-top: 14px; gap: 8px; }
+  .quiz-btn { padding: 10px 16px; font-size: 0.85rem; }
+
+  .group-tabs { padding-top: 14px; }
+  .alpha-bar { padding-top: 10px; gap: 5px; }
+  .alpha-btn { width: 34px; height: 34px; font-size: 0.8rem; }
+
+  .filter-row { padding-top: 10px; }
+
+  .card-grid { gap: 14px; padding-top: 16px; padding-bottom: 28px; }
+
+  .full-page { padding-top: 16px; padding-bottom: 40px; }
+  .exam-panel { padding: 20px; }
+  .exam-chooser { gap: 14px; }
+  .exam-choice-card { min-width: 0; padding: 16px; }
+
+  .modal { padding: 14px; }
+  .modal-card { padding: 20px; }
+  .progress-card { max-height: 92vh; }
+
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+
+  .card-image-wrap--photo { width: 72px; height: 88px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

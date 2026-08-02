@@ -547,9 +547,16 @@ function saveDailyHistory() {
   localStorage.setItem(LS_DAILY_HISTORY, JSON.stringify(dailyHistory));
 }
 
+function impPool() {
+  return shuffle(VOCAB.filter(v => v.imp === 3).map(v => v.w));
+}
+
 function generateDailyWords(target) {
-  if (!unseenPool || unseenPool.length === 0) unseenPool = shuffle(VOCAB.map(v => v.w));
-  if (unseenPool.length < target) unseenPool = shuffle(VOCAB.map(v => v.w));
+  // Guard against a pool saved before Daily Challenge was restricted to
+  // high-priority words — drop anything that isn't imp:3 before drawing.
+  if (unseenPool) unseenPool = unseenPool.filter(w => { const v = VOCAB.find(x => x.w === w); return v && v.imp === 3; });
+  if (!unseenPool || unseenPool.length === 0) unseenPool = impPool();
+  if (unseenPool.length < target) unseenPool = impPool();
   const picked = unseenPool.slice(0, target);
   unseenPool = unseenPool.slice(target);
   saveUnseenPool();
@@ -637,19 +644,18 @@ dailyChangeTarget.addEventListener("click", () => {
   dailyTargetInput.value = dailyTarget;
 });
 
-// ---------- Exams (full page): Daily Exam (yesterday's words) + 3-Day Review Exam (all done words in the current window) ----------
-const LS_REVIEW_WINDOW = "vocabmaster_review_window";
-let reviewWindow = JSON.parse(localStorage.getItem(LS_REVIEW_WINDOW) || "null") || { windowStart: getTodayStr() };
-function saveReviewWindow() { localStorage.setItem(LS_REVIEW_WINDOW, JSON.stringify(reviewWindow)); }
-
+// ---------- Exams (full page): Daily Exam (yesterday's words) + 3-Day Review Exam (words done in the last 3 rolling days) ----------
 function dailyExamPool() {
   return dailyHistory[getYesterdayStr(getTodayStr())] || [];
 }
-function threeDayExamPool() {
-  return Object.keys(learnedLog).filter(w => learnedLog[w] >= reviewWindow.windowStart);
+function threeDayWindowStart() {
+  const cutoff = new Date(`${getTodayStr()}T00:00:00`);
+  cutoff.setDate(cutoff.getDate() - (REVIEW_WINDOW_DAYS - 1));
+  return dateToStr(cutoff);
 }
-function threeDayExamUnlocked() {
-  return daysBetween(reviewWindow.windowStart, getTodayStr()) >= REVIEW_WINDOW_DAYS;
+function threeDayExamPool() {
+  const cutoffStr = threeDayWindowStart();
+  return Object.keys(learnedLog).filter(w => learnedLog[w] >= cutoffStr);
 }
 
 const examsBtn = document.getElementById("examsBtn");
@@ -687,16 +693,11 @@ function renderExamChooser() {
   startDailyExamBtn.disabled = dPool.length === 0;
 
   const tPool = threeDayExamPool();
-  const unlocked = threeDayExamUnlocked();
-  if (!unlocked) {
-    const daysLeft = REVIEW_WINDOW_DAYS - daysBetween(reviewWindow.windowStart, getTodayStr());
-    threeDayExamHint.textContent = `Unlocks in ${daysLeft} day${daysLeft === 1 ? "" : "s"} — ${tPool.length} word${tPool.length === 1 ? "" : "s"} completed so far this window.`;
-    start3DayExamBtn.disabled = true;
-  } else if (tPool.length === 0) {
-    threeDayExamHint.textContent = "No words completed in this window yet — mark some words done, then come back.";
+  if (tPool.length === 0) {
+    threeDayExamHint.textContent = "No words completed in the last 3 days yet — mark some words done, then come back.";
     start3DayExamBtn.disabled = true;
   } else {
-    threeDayExamHint.textContent = `${tPool.length} word${tPool.length === 1 ? "" : "s"} completed this window — ready to test!`;
+    threeDayExamHint.textContent = `${tPool.length} word${tPool.length === 1 ? "" : "s"} completed in the last 3 days — ready to test!`;
     start3DayExamBtn.disabled = false;
   }
 }
@@ -757,13 +758,6 @@ function showExamResults() {
         )
         .join("")
     : `<p class="quiz-sub">Perfect score! No missed words 🎉</p>`;
-
-  // The 3-Day exam is a periodic checkpoint, not a gate — taking it (any score)
-  // starts a fresh 3-day window for the next one.
-  if (currentExamMode === "threeday") {
-    reviewWindow = { windowStart: getTodayStr() };
-    saveReviewWindow();
-  }
 }
 
 function startExam(mode, pool) {
@@ -1171,3 +1165,7 @@ doneSearch.addEventListener("input", () => {
 renderGroupTabs();
 renderAlphaBar();
 renderCards();
+// Refresh today's Daily Challenge batch on load (not just when the tab is opened) so a
+// day's completion is tracked — and the streak can advance — even if today's words get
+// marked done from elsewhere in the app before Daily Challenge is ever visited.
+if (dailyTarget) ensureDailyState();
