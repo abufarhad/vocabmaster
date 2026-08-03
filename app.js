@@ -506,16 +506,13 @@ document.getElementById("examPageBack").addEventListener("click", returnToMainVi
 // ---------- Daily Challenge (full page, shows real vocab cards for today's words) ----------
 const LS_DAILY_TARGET = "vocabmaster_daily_target";
 const LS_DAILY_STATE = "vocabmaster_daily_state";
-const LS_DAILY_HISTORY = "vocabmaster_daily_history";
 const LS_UNSEEN_POOL = "vocabmaster_unseen_pool";
 const LS_STREAK = "vocabmaster_streak";
 const LS_EXAM_STATS = "vocabmaster_exam_stats";
-const REVIEW_WINDOW_DAYS = 3;
 const EXAM_LEN_CAP = 20;
 
 let dailyTarget = parseInt(localStorage.getItem(LS_DAILY_TARGET) || "0", 10);
 let dailyState = JSON.parse(localStorage.getItem(LS_DAILY_STATE) || "null");
-let dailyHistory = JSON.parse(localStorage.getItem(LS_DAILY_HISTORY) || "{}"); // { "YYYY-MM-DD": [words] }
 let unseenPool = JSON.parse(localStorage.getItem(LS_UNSEEN_POOL) || "null");
 let streakData = JSON.parse(localStorage.getItem(LS_STREAK) || '{"count":0,"lastCompletedDate":null}');
 let examStats = JSON.parse(localStorage.getItem(LS_EXAM_STATS) || '{"examsTaken":0,"totalCorrect":0,"totalQuestions":0,"bestPct":0,"history":[]}');
@@ -541,11 +538,6 @@ function shuffle(arr) {
 function saveDailyState() { localStorage.setItem(LS_DAILY_STATE, JSON.stringify(dailyState)); }
 function saveUnseenPool() { localStorage.setItem(LS_UNSEEN_POOL, JSON.stringify(unseenPool)); }
 function saveStreak() { localStorage.setItem(LS_STREAK, JSON.stringify(streakData)); }
-function saveDailyHistory() {
-  const dates = Object.keys(dailyHistory).sort();
-  while (dates.length > 14) delete dailyHistory[dates.shift()];
-  localStorage.setItem(LS_DAILY_HISTORY, JSON.stringify(dailyHistory));
-}
 
 function impPool() {
   return shuffle(VOCAB.filter(v => v.imp === 3).map(v => v.w));
@@ -563,18 +555,12 @@ function generateDailyWords(target) {
   return picked;
 }
 
-function recordDailyBatch(date, words) {
-  dailyHistory[date] = words;
-  saveDailyHistory();
-}
-
 function ensureDailyState() {
   const today = getTodayStr();
   if (dailyState && dailyState.date === today) return dailyState;
   const words = generateDailyWords(dailyTarget);
   dailyState = { date: today, target: dailyTarget, words };
   saveDailyState();
-  recordDailyBatch(today, words);
   return dailyState;
 }
 
@@ -635,7 +621,6 @@ dailyStartBtn.addEventListener("click", () => {
   const words = generateDailyWords(val);
   dailyState = { date: getTodayStr(), target: val, words };
   saveDailyState();
-  recordDailyBatch(dailyState.date, words);
   renderDailyPage();
 });
 dailyChangeTarget.addEventListener("click", () => {
@@ -644,18 +629,14 @@ dailyChangeTarget.addEventListener("click", () => {
   dailyTargetInput.value = dailyTarget;
 });
 
-// ---------- Exams (full page): Daily Exam (yesterday's words) + 3-Day Review Exam (words done in the last 3 rolling days) ----------
+// ---------- Exams (full page): Daily Exam (today's Daily Challenge batch) + 3-Day Review Exam (every word marked done) ----------
 function dailyExamPool() {
-  return dailyHistory[getYesterdayStr(getTodayStr())] || [];
-}
-function threeDayWindowStart() {
-  const cutoff = new Date(`${getTodayStr()}T00:00:00`);
-  cutoff.setDate(cutoff.getDate() - (REVIEW_WINDOW_DAYS - 1));
-  return dateToStr(cutoff);
+  if (!dailyTarget) return [];
+  ensureDailyState();
+  return dailyState.words;
 }
 function threeDayExamPool() {
-  const cutoffStr = threeDayWindowStart();
-  return Object.keys(learnedLog).filter(w => learnedLog[w] >= cutoffStr);
+  return [...learned];
 }
 
 const examsBtn = document.getElementById("examsBtn");
@@ -688,16 +669,16 @@ function renderExamChooser() {
 
   const dPool = dailyExamPool();
   dailyExamHint.textContent = dPool.length
-    ? `${dPool.length} word${dPool.length === 1 ? "" : "s"} from yesterday's Daily Challenge, ready to test.`
-    : "No Daily Challenge words from yesterday yet — use Daily Challenge, then come back tomorrow.";
+    ? `${dPool.length} word${dPool.length === 1 ? "" : "s"} from today's Daily Challenge, ready to test.`
+    : "No Daily Challenge words yet — start a Daily Challenge batch first.";
   startDailyExamBtn.disabled = dPool.length === 0;
 
   const tPool = threeDayExamPool();
   if (tPool.length === 0) {
-    threeDayExamHint.textContent = "No words completed in the last 3 days yet — mark some words done, then come back.";
+    threeDayExamHint.textContent = "No words marked done yet — mark some words done, then come back.";
     start3DayExamBtn.disabled = true;
   } else {
-    threeDayExamHint.textContent = `${tPool.length} word${tPool.length === 1 ? "" : "s"} completed in the last 3 days — ready to test!`;
+    threeDayExamHint.textContent = `${tPool.length} word${tPool.length === 1 ? "" : "s"} done overall — ready to test!`;
     start3DayExamBtn.disabled = false;
   }
 }
