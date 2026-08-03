@@ -6,7 +6,7 @@ An interactive English vocabulary learning site built for BCS, Bank, and IBA exa
 
 ## Features
 
-- **449 words** across BCS & Bank Exams, IBA Admission, Word Smart I, and Word Smart II (real book images + a bonus curated set)
+- **1699 words** across BCS & Bank Exams, IBA Admission, Word Smart I, and Word Smart II (real book images + a bonus curated set)
 - Each word: IPA pronunciation, part of speech, English meaning, Bangla meaning, example sentence, synonyms/antonyms, a memory-trick mnemonic, and an exam-relevance reference
 - 🔊 Text-to-speech pronunciation + 🎤 mic-based pronunciation scoring (Web Speech API)
 - Flip cards, search, group tabs, and mutually-exclusive Favorites / Most Important / Done filters
